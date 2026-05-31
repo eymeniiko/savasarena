@@ -1,30 +1,308 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Savaş Arena</title>
-    <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <title>⚔️ 2 Kişilik Savaş</title>
+  <style>
+    body { font-family: Arial; background: #1a1a2e; color: #eee; text-align: center; padding: 20px; }
+    .kutu { background: #16213e; border-radius: 12px; padding: 20px; max-width: 500px; margin: 10px auto; }
+    button { background: #e94560; border: none; color: white; padding: 12px 24px; margin: 8px; border-radius: 8px; font-size: 16px; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    input, textarea { width: 90%; padding: 10px; margin: 10px 0; border-radius: 6px; border: none; }
+    .can { font-size: 24px; font-weight: bold; color: #f5c518; }
+    .log { background: #0f3460; border-radius: 8px; padding: 12px; min-height: 60px; text-align: left; max-height: 150px; overflow-y: auto; }
+    .saldiri { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+  </style>
 </head>
 <body>
-    <div id="menu">
-        <h1>⚔️ Savaş Arena</h1>
-        <input type="text" id="roomInput" placeholder="Oda ID gir (boş bırakırsan yeni oda)" maxlength="10">
-        <button id="startBtn">Savaşa Başla</button>
-        <p id="info"></p>
-    </div>
-    <canvas id="gameCanvas" style="display:none;"></canvas>
-    <div id="ui" style="display:none;">
-        <span id="healthDisplay">❤️ 100</span>
-        <span id="roomDisplay"></span>
-    </div>
+  <h1>⚔️ KRAL SAVAŞ ARENASI ⚔️</h1>
 
-    <!-- Firebase SDK'ları -->
-    <script type="module">
-        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-        import { getDatabase, ref, set, onValue, push, update, remove, onDisconnect, get } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js';
-        window.firebaseModules = { initializeApp, getDatabase, ref, set, onValue, push, update, remove, onDisconnect, get };
-    </script>
-    <script src="game.js" type="module"></script>
+  <!-- BAĞLANTI ALANI -->
+  <div class="kutu" id="baglantiKutusu">
+    <h3>🔗 Bağlantı Kur</h3>
+    <p><strong>1. Oyuncu (Odayı Aç):</strong></p>
+    <button onclick="odaAc()">Oda Aç ve Teklif Al</button>
+    <textarea id="teklifMetni" placeholder="Buraya çıkacak teklif kopyalanır..." readonly rows="4"></textarea>
+    <br><button onclick="kopyala('teklifMetni')">Teklifi Kopyala</button>
+    <hr>
+    <p><strong>2. Oyuncu (Odaya Katıl):</strong></p>
+    <textarea id="teklifYapistir" placeholder="1. oyuncudan aldığın teklifi buraya yapıştır..." rows="4"></textarea>
+    <button onclick="cevapOlustur()">Cevap Oluştur</button>
+    <textarea id="cevapMetni" placeholder="Cevap burada belirecek..." readonly rows="4"></textarea>
+    <br><button onclick="kopyala('cevapMetni')">Cevabı Kopyala</button>
+    <hr>
+    <p><strong>1. Oyuncu Cevabı Yapıştır:</strong></p>
+    <textarea id="cevapYapistir" placeholder="2. oyuncudan gelen cevabı buraya yapıştır..." rows="4"></textarea>
+    <button onclick="cevabiOnayla()">Bağlantıyı Tamamla</button>
+    <p id="durum">Durum: Bağlanmadı</p>
+  </div>
+
+  <!-- OYUN ALANI -->
+  <div class="kutu" id="oyunAlani" style="display:none;">
+    <h3>⚡ Savaş</h3>
+    <div style="display: flex; justify-content: space-around;">
+      <div>
+        <p>SEN</p>
+        <p class="can" id="benimCan">100</p>
+      </div>
+      <div>
+        <p>RAKİP</p>
+        <p class="can" id="rakipCan">100</p>
+      </div>
+    </div>
+    <div class="saldiri" id="saldiriButonlari">
+      <button onclick="hamleGonder('normal')">👊 Normal Saldırı (10-20)</button>
+      <button onclick="hamleGonder('ozel')">💥 Özel Saldırı (25-35)</button>
+      <button onclick="hamleGonder('savun')">🛡️ Savun (Hasarı Yarıla)</button>
+    </div>
+    <div class="log" id="logKutusu">⚔️ Savaş başladı!</div>
+    <button onclick="yenidenBaslat()">🔄 Yeniden Başlat</button>
+  </div>
+
+  <script>
+    // ---------- WebRTC Değişkenleri ----------
+    let yerelBaglanti, veriKanali;
+    const sinyalSunucu = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+    let benimCan = 100, rakipCan = 100;
+    let savunmaAktif = false;  // bu tur savunma yaptıysam true
+    let hamleBekle = false;
+    let rakipHamle = null;
+
+    // ---------- Bağlantı Fonksiyonları ----------
+    async function odaAc() {
+      yerelBaglanti = new RTCPeerConnection(sinyalSunucu);
+      veriKanali = yerelBaglanti.createDataChannel("savas");
+      veriKanali.onmessage = mesajIsle;
+      veriKanali.onopen = () => {
+        document.getElementById("durum").innerText = "Durum: Bağlı (1. oyuncu)";
+        oyunuBaslat();
+      };
+
+      yerelBaglanti.onicecandidate = (e) => {
+        if (e.candidate) return;
+        // aday toplama tamamlandığında teklif metnini göster
+        document.getElementById("teklifMetni").value = JSON.stringify(yerelBaglanti.localDescription);
+      };
+
+      const teklif = await yerelBaglanti.createOffer();
+      await yerelBaglanti.setLocalDescription(teklif);
+    }
+
+    async function cevapOlustur() {
+      const teklifStr = document.getElementById("teklifYapistir").value.trim();
+      if (!teklifStr) return alert("Teklif metnini yapıştır!");
+
+      yerelBaglanti = new RTCPeerConnection(sinyalSunucu);
+      yerelBaglanti.ondatachannel = (e) => {
+        veriKanali = e.channel;
+        veriKanali.onmessage = mesajIsle;
+        veriKanali.onopen = () => {
+          document.getElementById("durum").innerText = "Durum: Bağlı (2. oyuncu)";
+          oyunuBaslat();
+        };
+      };
+
+      yerelBaglanti.onicecandidate = (e) => {
+        if (e.candidate) return;
+        document.getElementById("cevapMetni").value = JSON.stringify(yerelBaglanti.localDescription);
+      };
+
+      await yerelBaglanti.setRemoteDescription(JSON.parse(teklifStr));
+      const cevap = await yerelBaglanti.createAnswer();
+      await yerelBaglanti.setLocalDescription(cevap);
+    }
+
+    async function cevabiOnayla() {
+      const cevapStr = document.getElementById("cevapYapistir").value.trim();
+      if (!cevapStr) return alert("Cevap metnini yapıştır!");
+      await yerelBaglanti.setRemoteDescription(JSON.parse(cevapStr));
+    }
+
+    function kopyala(id) {
+      const alan = document.getElementById(id);
+      alan.select();
+      document.execCommand("copy");
+      alert("Kopyalandı!");
+    }
+
+    // ---------- Oyun Mantığı ----------
+    function oyunuBaslat() {
+      benimCan = 100; rakipCan = 100; savunmaAktif = false;
+      document.getElementById("benimCan").innerText = benimCan;
+      document.getElementById("rakipCan").innerText = rakipCan;
+      document.getElementById("baglantiKutusu").style.display = "none";
+      document.getElementById("oyunAlani").style.display = "block";
+      document.getElementById("logKutusu").innerHTML = "⚔️ Savaş başladı! Hamleni seç.";
+      hamleButonlariniAktifEt(true);
+    }
+
+    function hamleButonlariniAktifEt(aktif) {
+      const butonlar = document.querySelectorAll("#saldiriButonlari button");
+      butonlar.forEach(b => b.disabled = !aktif);
+    }
+
+    function hamleGonder(tur) {
+      if (hamleBekle) return;
+      hamleBekle = true;
+      hamleButonlariniAktifEt(false);
+      // Hamleyi rakibe gönder
+      veriKanali.send(JSON.stringify({ type: "hamle", hamle: tur }));
+      logEkle("Sen: " + hamleIsim(tur) + " seçtin.");
+      // Eğer rakip hamlesi zaten geldiyse hesapla, yoksa bekle
+      if (rakipHamle) {
+        hesaplaVeUygula(tur, rakipHamle);
+        rakipHamle = null;
+        hamleBekle = false;
+        turBitti();
+      } else {
+        // rakibin hamlesi gelene kadar bekle (mesajIsle devreye girer)
+      }
+    }
+
+    function mesajIsle(e) {
+      const veri = JSON.parse(e.data);
+      if (veri.type === "hamle") {
+        logEkle("Rakip: " + hamleIsim(veri.hamle) + " seçti.");
+        if (hamleBekle) {
+          // bizim hamle zaten gönderildi, hesapla
+          hesaplaVeUygula(bizimSonHamle(), veri.hamle);
+          hamleBekle = false;
+          turBitti();
+        } else {
+          // bizim hamle henüz seçilmedi, rakip hamleyi sakla
+          rakipHamle = veri.hamle;
+        }
+      } else if (veri.type === "reset") {
+        benimCan = 100; rakipCan = 100;
+        document.getElementById("benimCan").innerText = benimCan;
+        document.getElementById("rakipCan").innerText = rakipCan;
+        document.getElementById("logKutusu").innerHTML = "⚔️ Yeni savaş başladı!";
+        hamleButonlariniAktifEt(true);
+      }
+    }
+
+    let bizimSonHamleVeri = null;
+    function bizimSonHamle() {
+      // Bu fonksiyon sadece mesajIsle içinden çağrılırken ihtiyaç olursa,
+      // ama biz hamleyi gönderirken zaten biliyoruz. Daha basit: değişkene ata.
+      return bizimSonHamleVeri;
+    }
+
+    // Yukarıdaki hamleGonder'i güncelleyelim: son hamleyi sakla
+    // (Kodda küçük düzenleme yapıyorum, aşağıda tam fonksiyon tekrar)
+    // Bunun için hamleGonder'ı yeniden yazacağım. Şimdi düzeltilmiş hali:
+
+    // ---------- Hamle İşleme (güncel) ----------
+    function hamleGonder(tur) {
+      if (hamleBekle) return;
+      hamleBekle = true;
+      bizimSonHamleVeri = tur;
+      hamleButonlariniAktifEt(false);
+      veriKanali.send(JSON.stringify({ type: "hamle", hamle: tur }));
+      logEkle("Sen: " + hamleIsim(tur) + " seçtin.");
+      if (rakipHamle) {
+        hesaplaVeUygula(tur, rakipHamle);
+        rakipHamle = null;
+        hamleBekle = false;
+        turBitti();
+      }
+    }
+
+    function mesajIsle(e) {
+      const veri = JSON.parse(e.data);
+      if (veri.type === "hamle") {
+        logEkle("Rakip: " + hamleIsim(veri.hamle) + " seçti.");
+        if (hamleBekle) {
+          hesaplaVeUygula(bizimSonHamleVeri, veri.hamle);
+          hamleBekle = false;
+          turBitti();
+        } else {
+          rakipHamle = veri.hamle;
+        }
+      } else if (veri.type === "reset") {
+        benimCan = 100; rakipCan = 100;
+        document.getElementById("benimCan").innerText = benimCan;
+        document.getElementById("rakipCan").innerText = rakipCan;
+        document.getElementById("logKutusu").innerHTML = "⚔️ Yeni savaş başladı!";
+        hamleButonlariniAktifEt(true);
+      }
+    }
+
+    function hesaplaVeUygula(bizimHamle, rakipHamleTip) {
+      let bizimHasar = 0, rakipHasar = 0;
+      // Kendi hamlemize göre hasar belirle
+      if (bizimHamle === "normal") bizimHasar = rastgele(10, 20);
+      else if (bizimHamle === "ozel") bizimHasar = rastgele(25, 35);
+      else if (bizimHamle === "savun") { bizimHasar = 0; savunmaAktif = true; }
+
+      // Rakibin hamlesine göre onun hasarı
+      if (rakipHamleTip === "normal") rakipHasar = rastgele(10, 20);
+      else if (rakipHamleTip === "ozel") rakipHasar = rastgele(25, 35);
+      else if (rakipHamleTip === "savun") rakipHasar = 0; // rakibin savunması onun alacağı hasarı etkilemez, ama biz hasar veririz? 
+      // Daha adil: eğer rakip savunma yaparsa bizim hasar yarılanır. Aynı şekilde biz savunma yaparsak rakip hasarı yarılanır.
+      // Şu an sadece bizim savunmaAktif bayrağımız var, rakip savunmasını bilmiyoruz. O yüzden hamle verisine "savun" gelmişse rakipSavunma=true.
+      let rakipSavunma = (rakipHamleTip === "savun");
+      let bizimSavunma = savunmaAktif;
+
+      if (rakipSavunma) bizimHasar = Math.floor(bizimHasar / 2);
+      if (bizimSavunma) rakipHasar = Math.floor(rakipHasar / 2);
+
+      // Can güncelle
+      rakipCan -= bizimHasar;
+      if (rakipCan < 0) rakipCan = 0;
+      benimCan -= rakipHasar;
+      if (benimCan < 0) benimCan = 0;
+
+      document.getElementById("benimCan").innerText = benimCan;
+      document.getElementById("rakipCan").innerText = rakipCan;
+
+      let logMesaj = `⚡ Sen ${bizimHasar} vurdun, rakip ${rakipHasar} vurdu.`;
+      if (bizimSavunma) logMesaj += " (Savundun)";
+      if (rakipSavunma) logMesaj += " (Rakip savundu)";
+      logEkle(logMesaj);
+
+      savunmaAktif = false;
+      // kazanan kontrolü
+      if (benimCan <= 0 && rakipCan <= 0) logEkle("💀 Berabere! İkiniz de yere yığıldınız.");
+      else if (benimCan <= 0) logEkle("😵 Kaybettin! Rakip kazandı.");
+      else if (rakipCan <= 0) logEkle("🏆 Kazandın! Rakibini alt ettin.");
+    }
+
+    function turBitti() {
+      if (benimCan <= 0 || rakipCan <= 0) {
+        hamleButonlariniAktifEt(false);
+        // 3 saniye sonra yeniden başlat butonu aktif zaten
+      } else {
+        hamleButonlariniAktifEt(true);
+      }
+    }
+
+    function yenidenBaslat() {
+      if (!veriKanali || veriKanali.readyState !== "open") return;
+      benimCan = 100; rakipCan = 100;
+      document.getElementById("benimCan").innerText = benimCan;
+      document.getElementById("rakipCan").innerText = rakipCan;
+      document.getElementById("logKutusu").innerHTML = "⚔️ Yeni savaş başladı!";
+      hamleButonlariniAktifEt(true);
+      veriKanali.send(JSON.stringify({ type: "reset" }));
+    }
+
+    function hamleIsim(tur) {
+      if (tur === "normal") return "Normal Saldırı";
+      if (tur === "ozel") return "Özel Saldırı";
+      if (tur === "savun") return "Savun";
+      return tur;
+    }
+
+    function rastgele(min, max) {
+      return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    function logEkle(mesaj) {
+      const log = document.getElementById("logKutusu");
+      log.innerHTML += "<br>" + mesaj;
+      log.scrollTop = log.scrollHeight;
+    }
+  </script>
 </body>
 </html>
