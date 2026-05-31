@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Savaş Arena</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="menu">
+        <h1>⚔️ Savaş Arena</h1>
+        <input type="text" id="roomInput" placeholder="Oda ID gir (boş bırakırsan yeni oda)" maxlength="10">
+        <button id="startBtn">Savaşa Başla</button>
+        <p id="info"></p>
+    </div>
+    <canvas id="gameCanvas" style="display:none;"></canvas>
+    <div id="ui" style="display:none;">
+        <span id="healthDisplay">❤️ 100</span>
+        <span id="roomDisplay"></span>
+    </div>
+
+    <!-- Firebase SDK'ları -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getDatabase, ref, set, onValue, push, update, remove, onDisconnect, get } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js';
+        window.firebaseModules = { initializeApp, getDatabase, ref, set, onValue, push, update, remove, onDisconnect, get };
+    </script>
+    <script src="game.js" type="module"></script>
+</body>
+</html>
